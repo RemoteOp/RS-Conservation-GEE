@@ -1,0 +1,248 @@
+//**** STEP 1: USER PARAMETERS ****//
+
+// charting period 
+var startYear = 2000;
+var endYear = 2020;
+var startMonth = 1;
+var endMonth = 12;
+
+// baseline period 
+var b_start = "2000-01-01";
+var b_end = "2015-02-28";
+
+// start and end day numbers of the year that will be used for calculating the baseline
+var bm_start = 1;
+var bm_end = 365;
+
+// anomaly (study) period
+var anom_start = "2015-03-01";
+var anom_end = "2018-07-31";
+
+// date range for filtering Landsat collection
+var f_start = '2000-01-01';
+var f_end = '2020-12-31';
+
+
+//**** STEP 2: LOAD LANDSAT AND DEFINE FUNCTIONS ****//
+
+// Landsat 7 surface reflectance (SR) collection
+var dataset = ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
+                  .filterDate(f_start, f_end)
+                  .filterBounds(HR_AOI);
+
+print(dataset.first(),"dataset");
+
+// Masking Landsat 7 surface reflectance images
+// (name says L8, but works for L7 C02 L2 as well – you can rename to prepSrL7 if you like)
+function prepSrL8(image) {
+  var qaMask = image.select('QA_PIXEL').bitwiseAnd(parseInt('11111', 2)).eq(0);
+  var saturationMask = image.select('QA_RADSAT').eq(0);
+
+  // Apply the scaling factors to the appropriate bands.
+  var getFactorImg = function(factorNames) {
+    var factorList = image.toDictionary().select(factorNames).values();
+    return ee.Image.constant(factorList);
+  };
+  var scaleImg = getFactorImg([
+    'REFLECTANCE_MULT_BAND_.|TEMPERATURE_MULT_BAND_ST_B6']);
+  var offsetImg = getFactorImg([
+    'REFLECTANCE_ADD_BAND_.|TEMPERATURE_ADD_BAND_ST_B6']);
+  var scaled = image.select('SR_B.|ST_B6').multiply(scaleImg).add(offsetImg);
+
+  // Replace original bands with scaled bands and apply masks.
+  return image.addBands(scaled, null, true)
+    .updateMask(qaMask).updateMask(saturationMask);
+}
+
+// Calculate NDVI in vegetated areas
+var lc = ee.ImageCollection('ESA/WorldCover/v200').first().clip(HR_AOI);
+
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['SR_B4', 'SR_B3']).rename('NDVI')
+                 .updateMask(lc.eq(10).or(lc.eq(20)).or(lc.eq(30)));
+  return image.addBands(ndvi);
+};
+
+// Apply functions on filtered image collection
+var cloudmasked = dataset.map(prepSrL8); 
+var withNDVI = cloudmasked.map(addNDVI);
+
+// Create new filtered collection covering only baseline period
+var withNDVI_baseline = withNDVI.filterDate(b_start, b_end); 
+
+
+//**** STEP 3: CALCULATE MONTHLY NDVI AND ANOMALIES ****//
+
+var years = ee.List.sequence(startYear, endYear);
+var months = ee.List.sequence(startMonth, endMonth);
+
+// Calculate monthly average NDVI over full period
+var monthlyNDVI =  ee.ImageCollection.fromImages(
+  years.map(function(y) {
+    return months.map(function(m) {
+      var filtered = withNDVI
+                          .select("NDVI")
+                          .filter(ee.Filter.calendarRange(y, y, 'year'))
+                          .filter(ee.Filter.calendarRange(m, m, 'month'))
+                          .mean();
+      return filtered.set({
+        'year': y,
+        'month': m,
+        'system:time_start': ee.Date.fromYMD(y, m, 1).millis()
+      });
+    });
+  }).flatten()
+);
+print(monthlyNDVI,"Monthly NDVI");
+
+// Debug – check if any months are totally empty
+var emptyMonths = monthlyNDVI
+  .filter(ee.Filter.eq('bandNames', []))
+  .aggregate_array('system:time_start')
+  .map(function(ms) {
+    return ee.Date(ms).format('YYYY-MM');
+  });
+print('Months with empty NDVI:', emptyMonths);
+
+// STEP 5 — BASELINE MEAN NDVI
+// ==============================
+
+// Compute baseline NDVI climatology (12 images: Jan–Dec)
+var meanMonthlyNDVI = ee.ImageCollection.fromImages(
+  ee.List.sequence(1, 12).map(function(m) {
+    var baselineMonth = monthlyNDVI
+      .filterDate(b_start, b_end)       // baseline period 2000–2015
+      .filter(ee.Filter.eq('month', m)) // select this calendar month
+      .mean()                           // multi-year mean
+      .set('month', m);
+    return baselineMonth;
+  })
+);
+
+// Print to console
+print("Baseline monthly NDVI (12-image climatology)", meanMonthlyNDVI);
+
+
+//====================================================================//
+//**** STEP 4: COMPUTE MONTHLY NDVI ANOMALIES (study period) ****//
+//====================================================================//
+
+// Function to compute the anomaly for a given month (your original logic)
+var computeAnomaly = function(image) {
+
+  var year  = image.get('year');
+  var month = image.get('month');
+
+  // Baseline for the same calendar month
+  var referenceImage = meanMonthlyNDVI
+    .filter(ee.Filter.eq('month', month))
+    .first();
+
+  // SAFETY: check that the study image has NDVI pixels
+  var hasBands = image.bandNames().size().gt(0);
+
+  // SAFETY: ensure baseline month also has NDVI
+  var anomalyImage = ee.Algorithms.If(
+    hasBands,
+    ee.Algorithms.If(
+      referenceImage.bandNames().size().gt(0),
+      image.subtract(referenceImage),   // NDVI_study − NDVI_baseline
+      image                              
+    ),
+    image
+  );
+
+  return ee.Image(anomalyImage)
+    .rename('NDVI_anomaly')
+    .set({
+      'system:time_start': image.get('system:time_start'),
+      'year': year,
+      'month': month
+    });
+};
+
+// Monthly NDVI anomalies for ALL years
+var monthlyNDVIAnomalies = monthlyNDVI.map(computeAnomaly);
+
+// Restrict anomalies to the study period only
+var monthlyNDVIAnomalies_anom =
+    monthlyNDVIAnomalies.filterDate(anom_start, anom_end);
+
+print("Monthly NDVI anomalies (study period)", monthlyNDVIAnomalies_anom);
+
+
+//====================================================================//
+//**** STEP 5: MEAN ANOMALY PER MONTH (study period) ****//
+//====================================================================//
+
+// Reduce each anomaly image to a single mean value for charts/tables
+var meanByMonth = monthlyNDVIAnomalies_anom.map(function(image) {
+  var meanDict = image.reduceRegion({
+    geometry: HR_AOI,
+    reducer: ee.Reducer.mean(),
+    scale: 100
+  });
+
+  return ee.Feature(null, meanDict)
+    .set('year', image.get('year'))
+    .set('month', image.get('month'));
+});
+
+print("Mean anomaly per month", meanByMonth);
+
+
+//====================================================================//
+//**** STEP 6: ANOMALY IMAGE LAYERS (MAP OUTPUTS) ****//
+//====================================================================//
+
+// 1) BASELINE MEAN NDVI (entire baseline period, full seasonal cycle)
+var baseline = withNDVI_baseline
+  .select("NDVI")
+  .filter(ee.Filter.dayOfYear(bm_start, bm_end))
+  .mean()
+  .clip(HR_AOI);
+
+
+// -------------------------
+// (A) MEAN ANOMALY MAP
+// -------------------------
+
+// Mean NDVI during study period
+var study_meanNDVI = withNDVI
+  .filterDate(anom_start, anom_end)
+  .select("NDVI")
+  .mean()
+  .clip(HR_AOI);
+
+// Mean anomaly = (study mean) − (baseline mean)
+var meanAnomaly = study_meanNDVI.subtract(baseline).rename("NDVI_mean_anomaly");
+
+
+// -------------------------
+// (B) GREENEST-PIXEL (PEAK NDVI) ANOMALY MAP
+// -------------------------
+
+//var greenestPixel = withNDVI
+//  .filterDate(anom_start, anom_end)
+//  .qualityMosaic("NDVI")  // selects highest NDVI pixel over time
+//  .select("NDVI")
+//  .clip(HR_AOI)
+//  .rename("NDVI_peak");
+
+//var greenestAnomaly = greenestPixel.subtract(baseline).rename("NDVI_peak_anomaly");
+
+
+//====================================================================//
+//**** STEP 7: MAP LAYERS ****//
+//====================================================================//
+
+var anomalyVis = {
+  min: -0.1,
+  max: 0.1,
+  palette: ['FF0000', '000000', '00FF00']
+};
+
+// Add BOTH layers to the map
+Map.addLayer(meanAnomaly, anomalyVis, "Mean anomaly (study period)");
+//Map.addLayer(greenestAnomaly, anomalyVis, "Greenest-pixel anomaly");
+Map.centerObject(HR_AOI);
