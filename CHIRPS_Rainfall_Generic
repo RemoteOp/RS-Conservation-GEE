@@ -40,6 +40,15 @@ var allowedDesigs = [
 ];
 
 // ======================================================================
+// RECOMMENDED SCALE VALUES FOR CHIRPS
+// ======================================================================
+
+// Scale options:
+// - 250 m  : Very fine detail, large files, slow processing
+// - 1000 m (1 km) : Good detail, reasonable files, good speed (DEFAULT)
+// - 5000 m (5 km) : Current setting, coarse but fast
+
+// ======================================================================
 // LOAD AOI (Country or Custom - imported via Imports panel)
 // ======================================================================
 
@@ -185,7 +194,10 @@ var reducers_all = ee.Reducer.mean()
 var aoi_stats = chirps_study.reduceRegions({
   collection: AOI,
   reducer: reducers_all,
-  scale: 5000
+  scale: 1000 // ← ADJUST HERE: 5000m = 5km resolution
+              // Common values: 250 (250m), 1000 (1km), 5000 (5km)
+              // Larger = faster but less accurate
+              // Smaller = slower but more accurate
 });
 
 var aoi_stats_clean = aoi_stats.filter(ee.Filter.notNull(['mean']));
@@ -203,7 +215,7 @@ var reducers_all = ee.Reducer.mean()
 var pa_stats = chirps_study.reduceRegions({
   collection: PA,
   reducer: reducers_all,
-  scale: 5000
+  scale: 1000  // ← ADJUST HERE: Same scale for consistency
 });
 
 // Remove empty rows
@@ -232,8 +244,9 @@ Export.image.toDrive({
   description: output_prefix + '_StudyPeriod',
   fileNamePrefix: output_prefix + '_StudyPeriod',
   region: AOIgeom,
-  scale: 5000,
+  scale: 1000, // ← ADJUST HERE: Match with reduceRegions scale above for consistency
   maxPixels: 1e13
+  crs: 'EPSG:4326'  // ← ADD THIS: Explicitly set to WGS84
 });
 
 // Export raster: baseline
@@ -242,8 +255,9 @@ Export.image.toDrive({
   description: output_prefix + '_Baseline_' + baseline_start_year + '_' + baseline_end_year,
   fileNamePrefix: output_prefix + '_Baseline_' + baseline_start_year + '_' + baseline_end_year,
   region: AOIgeom,
-  scale: 5000,
+  scale: 1000, // ← ADJUST HERE: Match with reduceRegions scale above for consistency
   maxPixels: 1e13
+  crs: 'EPSG:4326'  // ← ADD THIS
 });
 
 // Export raster: anomaly
@@ -252,8 +266,9 @@ Export.image.toDrive({
   description: output_prefix + '_Anomaly',
   fileNamePrefix: output_prefix + '_Anomaly',
   region: AOIgeom,
-  scale: 5000,
+  scale: 1000, // ← ADJUST HERE: Match with reduceRegions scale above for consistency
   maxPixels: 1e13
+  crs: 'EPSG:4326'  // ← ADD THIS
 });
 
 // Export CSV: AOI-wide statistics
