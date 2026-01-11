@@ -8,7 +8,12 @@
 
 var country_name = 'Kenya';  // Change to your country
 
-// Study period  
+// CHOOSE AOI TYPE
+var use_custom_aoi = true;  // Set to TRUE to use imported AOI, FALSE for entire country
+// If use_custom_aoi = TRUE, make sure to import your AOI vector file in the Code Editor
+// (it will appear in the Imports panel automatically)
+
+// Study period
 var study_start = '2023-03-01';    
 var study_end   = '2023-05-31';
 
@@ -17,7 +22,6 @@ var baseline_start_year = 2000;
 var baseline_end_year   = 2015;
 
 // Day of year range (for seasonal analysis)
-// Date calculator: https://www.timeanddate.com/date/dateadded.html?d1=01&m1=01&y1=1990&type=add&ay=&am=&aw=&ad=1&rec=
 var doy_start = 60;   // March 1
 var doy_end   = 151;  // May 31
 
@@ -36,16 +40,35 @@ var allowedDesigs = [
 ];
 
 // ======================================================================
-// LOAD AOI & PROTECTED AREAS
+// LOAD AOI (Country or Custom - imported via Imports panel)
 // ======================================================================
 
-// Load country boundary (LSIB dataset)
-var AOI = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017")
-  .filter(ee.Filter.eq('country_na', country_name));
+var AOI;
+var AOIgeom;
+var aoi_label;
 
-var AOIgeom = AOI.geometry();  
+if (use_custom_aoi) {
+  // Use the imported AOI variable (you must import it in the Code Editor Imports panel first)
+  AOI = AOI;  // This references the imported variable from Imports
+  AOIgeom = AOI.geometry ? AOI.geometry() : AOI;
+  aoi_label = 'Custom AOI (imported)';
+  output_prefix = output_prefix + '_CustomAOI';
+  print("Using custom AOI from Imports panel");
+} else {
+  // Load country boundary (LSIB dataset)
+  AOI = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017")
+    .filter(ee.Filter.eq('country_na', country_name));
+  AOIgeom = AOI.geometry();
+  aoi_label = country_name + ' (entire country)';
+  output_prefix = output_prefix + '_Country';
+  print("Using entire country:", country_name);
+}
 
-// Filter WDPA by designation + intersection with country
+// ======================================================================
+// LOAD PROTECTED AREAS
+// ======================================================================
+
+// Filter WDPA by designation + intersection with AOI
 var PA = ee.FeatureCollection("WCMC/WDPA/current/polygons")
   .filter(ee.Filter.inList('DESIG_ENG', allowedDesigs))
   .map(function(f){ 
@@ -59,7 +82,7 @@ var PA_polygons = PA.map(function(f){
 })
 .filter(ee.Filter.inList('geometry_type', ['Polygon', 'MultiPolygon']));
 
-print("Country:", country_name);
+print("AOI:", aoi_label);
 print("Number of Protected Areas (PA):", PA.size());
 
 // ======================================================================
@@ -68,7 +91,7 @@ print("Number of Protected Areas (PA):", PA.size());
 
 var AOIVis = AOI.style({
   color: "FF4500",
-  width: 1,
+  width: 2,
   fillColor: "FFFFFF00"
 });
 
@@ -78,8 +101,8 @@ var PAVis = PA.style({
   fillColor: "FFFFFF00"
 });
 
-Map.centerObject(AOI, 7);
-Map.addLayer(AOIVis, {}, country_name + " (AOI)");
+Map.centerObject(AOIgeom, 7);
+Map.addLayer(AOIVis, {}, aoi_label);
 Map.addLayer(PAVis, {}, "Protected Areas (PA)");
 
 // ======================================================================
