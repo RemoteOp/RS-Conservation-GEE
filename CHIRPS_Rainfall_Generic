@@ -173,6 +173,26 @@ var anomalyVis = {
 Map.addLayer(rainfall_anomaly, anomalyVis, 'Rainfall anomaly (Study vs Baseline)');
 
 // ======================================================================
+// SPATIAL REDUCERS — Rainfall stats for ENTIRE AOI
+// ======================================================================
+
+var reducers_all = ee.Reducer.mean()
+  .combine(ee.Reducer.min(), null, true)
+  .combine(ee.Reducer.max(), null, true)
+  .combine(ee.Reducer.sum(), null, true);
+
+// Create a feature for the entire AOI with stats
+var aoi_stats = chirps_study.reduceRegions({
+  collection: AOI,
+  reducer: reducers_all,
+  scale: 5000
+});
+
+var aoi_stats_clean = aoi_stats.filter(ee.Filter.notNull(['mean']));
+
+print("AOI-wide stats (mean, min, max, sum):", aoi_stats_clean);
+
+// ======================================================================
 // SPATIAL REDUCERS — Rainfall stats for each Protected Area (PA)
 // ======================================================================
 
@@ -206,6 +226,7 @@ print("Clean PA stats + coords:", pa_stats_with_centroid);
 // EXPORTS (using output_prefix)
 // ======================================================================
 
+// Export raster: study period
 Export.image.toDrive({
   image: chirps_study,
   description: output_prefix + '_StudyPeriod',
@@ -215,6 +236,7 @@ Export.image.toDrive({
   maxPixels: 1e13
 });
 
+// Export raster: baseline
 Export.image.toDrive({
   image: chirps_baseline,
   description: output_prefix + '_Baseline_' + baseline_start_year + '_' + baseline_end_year,
@@ -224,21 +246,7 @@ Export.image.toDrive({
   maxPixels: 1e13
 });
 
-Export.table.toDrive({
-  collection: pa_stats_with_centroid,
-  description: output_prefix + '_PA_Stats',
-  fileNamePrefix: output_prefix + '_PA_Stats',
-  fileFormat: 'CSV',
-  selectors: ['NAME', 'DESIG_ENG', 'longitude', 'latitude', 'mean', 'min', 'max']
-});
-
-Export.table.toDrive({
-  collection: PA_polygons,
-  description: output_prefix + '_PA_Polygons',
-  fileNamePrefix: output_prefix + '_PA_Polygons',
-  fileFormat: 'SHP'
-});
-
+// Export raster: anomaly
 Export.image.toDrive({
   image: rainfall_anomaly,
   description: output_prefix + '_Anomaly',
@@ -246,6 +254,32 @@ Export.image.toDrive({
   region: AOIgeom,
   scale: 5000,
   maxPixels: 1e13
+});
+
+// Export CSV: AOI-wide statistics
+Export.table.toDrive({
+  collection: aoi_stats_clean,
+  description: output_prefix + '_AOI_Stats',
+  fileNamePrefix: output_prefix + '_AOI_Stats',
+  fileFormat: 'CSV',
+  selectors: ['mean', 'min', 'max', 'sum']
+});
+
+// Export CSV: PA statistics
+Export.table.toDrive({
+  collection: pa_stats_with_centroid,
+  description: output_prefix + '_PA_Stats',
+  fileNamePrefix: output_prefix + '_PA_Stats',
+  fileFormat: 'CSV',
+  selectors: ['NAME', 'DESIG_ENG', 'longitude', 'latitude', 'mean', 'min', 'max', 'sum']
+});
+
+// Export shapefile: PA polygons
+Export.table.toDrive({
+  collection: PA_polygons,
+  description: output_prefix + '_PA_Polygons',
+  fileNamePrefix: output_prefix + '_PA_Polygons',
+  fileFormat: 'SHP'
 });
 
 print("All exports queued with prefix:", output_prefix);
