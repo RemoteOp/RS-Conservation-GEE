@@ -1,0 +1,144 @@
+// ======================================================
+// SRTM ELEVATION ANALYSIS — GENERIC VERSION
+// ======================================================
+
+// ---- USER SETTINGS (edit these) ----
+var country_name = 'Spain';  // Change to your country
+var output_prefix = 'NASADEM_Elevation';  // Prefix for all exports
+var stats_description = 'AOI stats elevation';
+var percentiles_description = 'AOI percentiles elevation';
+
+// ======================================================
+// LOAD DATA
+// ======================================================
+
+// Load country boundary (LSIB dataset)
+var country = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
+  .filter(ee.Filter.eq('country_na', country_name))
+  .geometry();
+
+// Load SRTM elevation data
+var srtm = ee.Image("NASA/NASADEM_HGT/001").select('elevation');
+
+// Import AOI (must be imported in Code Editor as "AOI")
+
+var AOI_geometry = AOI.geometry ? AOI.geometry() : AOI;
+
+print('Country:', country_name);
+print('AOI loaded:', AOI_geometry);
+
+// ======================================================
+// VISUALIZATION
+// ======================================================
+
+var AOIVis = AOI.style({color: "FF4500", width: 3, fillColor: "FFFFFF00"});
+Map.addLayer(AOIVis, null, "AOI_boundary");
+Map.centerObject(AOI_geometry, 6);
+
+// Define visualization parameters
+var srtmVis = {
+  min: 0,
+  max: 3000,
+  palette: ['blue', 'green', 'yellow', 'orange', 'red']
+};
+
+var srtm_AOI = srtm.clip(AOI_geometry);
+var srtm_country = srtm.clip(country);
+
+Map.addLayer(srtm_AOI, srtmVis, 'AOI Elevation');
+Map.addLayer(srtm_country, srtmVis, country_name + ' SRTM');
+
+// ======================================================
+// HISTOGRAM
+// ======================================================
+var histogram = ui.Chart.image.histogram({
+  image: srtm_AOI,
+  region: AOI_geometry,
+  scale: 50,
+  minBucketWidth: 50
+});
+histogram.setOptions({
+  title: 'Histogram of Elevation in ' + country_name + ' AOI (meters)'
+});
+
+print(histogram);
+
+// ======================================================
+// SPATIAL REDUCERS — MEAN, MIN, MAX
+// ======================================================
+var reducers_all = ee.Reducer.mean()
+  .combine(ee.Reducer.min(), null, true)
+  .combine(ee.Reducer.max(), null, true);
+
+var AOI_stats = srtm_AOI.reduceRegions({
+  collection: AOI,
+  reducer: reducers_all,
+  scale: 30
+});
+
+// Remove empty rows
+var AOI_stats_clean = AOI_stats.filter(ee.Filter.notNull(['mean']));
+print("AOI Stats (mean, min, max):", AOI_stats_clean);
+
+// ======================================================
+// SPATIAL REDUCERS — PERCENTILES [50, 95]
+// ======================================================
+var percentiles = ee.Reducer.percentile([50, 95]);
+
+var AOI_percentiles = srtm_AOI.reduceRegions({
+  collection: AOI,
+  reducer: percentiles,
+  scale: 30
+});
+
+// Remove empty rows
+var AOI_percentiles_clean = AOI_percentiles.filter(
+  ee.Filter.notNull(['p50'])
+);
+print("AOI Percentiles (p50, p95):", AOI_percentiles_clean);
+
+// ======================================================
+// EXPORTS (using output_prefix)
+// ======================================================
+
+// Export AOI elevation raster
+Export.image.toDrive({
+  image: srtm_AOI,
+  description: output_prefix + '_AOI',
+  fileNamePrefix: output_prefix + '_AOI',
+  region: AOI_geometry,
+  scale: 30,
+  maxPixels: 1e13,
+  fileFormat: 'GeoTIFF',
+  formatOptions: {cloudOptimized: true}
+});
+
+// Export country elevation raster
+Export.image.toDrive({
+  image: srtm_country,
+  description: output_prefix + '_' + country_name,
+  fileNamePrefix: output_prefix + '_' + country_name,
+  region: country,
+  scale: 30,
+  maxPixels: 1e13,
+  fileFormat: 'GeoTIFF',
+  formatOptions: {cloudOptimized: true}
+});
+
+// Export statistics CSV
+Export.table.toDrive({
+  collection: AOI_stats_clean,
+  description: stats_description,
+  fileFormat: 'CSV',
+  selectors: ['mean', 'min', 'max']
+});
+
+// Export percentiles CSV
+Export.table.toDrive({
+  collection: AOI_percentiles_clean,
+  description: percentiles_description,
+  fileFormat: 'CSV',
+  selectors: ['p50', 'p95']
+});
+
+print("All exports queued!");
