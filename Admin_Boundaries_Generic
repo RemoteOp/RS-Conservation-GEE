@@ -37,6 +37,18 @@ var admin0 = level0.filter(ee.Filter.eq('ADM0_NAME', country_name));
 var admin1 = level1.filter(ee.Filter.eq('ADM0_NAME', country_name));
 var admin2 = level2.filter(ee.Filter.eq('ADM0_NAME', country_name));
 
+function keepPolygons(fc) {
+  return fc
+    .map(function(f) {
+      return f.set('geom_type', f.geometry().type());
+    })
+    .filter(ee.Filter.inList('geom_type', ['Polygon', 'MultiPolygon']));
+}
+
+admin0 = keepPolygons(admin0);
+admin1 = keepPolygons(admin1);
+admin2 = keepPolygons(admin2);
+
 print("Country:", country_name);
 print("Admin level 0 (country):", admin0.size());
 print("Admin level 1 (regions):", admin1.size());
