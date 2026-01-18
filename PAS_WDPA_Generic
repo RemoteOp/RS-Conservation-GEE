@@ -24,7 +24,7 @@ var allowedDesigs = [
   'National Sanctuary',
   'Wildlife Sanctuary',
   'UNESCO-MAB Biosphere Reserve'
-  // Add or remove designations as needed
+  // Add or remove designations as needed. Leave empty to include ALL
 ];
 
 // ======================================================================
