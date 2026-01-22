@@ -1,10 +1,17 @@
 // ======================================================
-// SRTM ELEVATION ANALYSIS — GENERIC VERSION
+// SRTM/NASADEM ELEVATION ANALYSIS — GENERIC VERSION
 // ======================================================
 
+// DATASET OPTION (switch as needed)
+// NASADEM (recommended): "NASA/NASADEM_HGT/001"
+// SRTM v3 (30m):        "USGS/SRTMGL1_003"
+// SRTM v4 (if available in GEE): check catalog for exact ID
+
+// ======================================================
 // ---- USER SETTINGS (edit these) ----
+// ======================================================
 var country_name = 'Spain';  // Change to your country
-var output_prefix = 'NASADEM_Elevation';  // Prefix for all exports
+var output_prefix = 'DEM_Elevation';  // Prefix for all exports
 var stats_description = 'AOI stats elevation';
 var percentiles_description = 'AOI percentiles elevation';
 
@@ -18,7 +25,7 @@ var country = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
   .geometry();
 
 // Load SRTM elevation data
-var srtm = ee.Image("NASA/NASADEM_HGT/001").select('elevation');
+var dem = ee.Image("NASA/NASADEM_HGT/001").select('elevation');
 
 // Import AOI (must be imported in Code Editor as "AOI")
 
@@ -36,23 +43,23 @@ Map.addLayer(AOIVis, null, "AOI_boundary");
 Map.centerObject(AOI_geometry, 6);
 
 // Define visualization parameters
-var srtmVis = {
+var demVis = {
   min: 0,
   max: 3000,
   palette: ['blue', 'green', 'yellow', 'orange', 'red']
 };
 
-var srtm_AOI = srtm.clip(AOI_geometry);
-var srtm_country = srtm.clip(country);
+var dem_AOI = dem.clip(AOI_geometry);
+var dem_country = dem.clip(country);
 
-Map.addLayer(srtm_AOI, srtmVis, 'AOI Elevation');
-Map.addLayer(srtm_country, srtmVis, country_name + ' SRTM');
+Map.addLayer(dem_AOI, demVis, 'AOI Elevation');
+Map.addLayer(dem_country, demVis, country_name + ' DEM');
 
 // ======================================================
 // HISTOGRAM
 // ======================================================
 var histogram = ui.Chart.image.histogram({
-  image: srtm_AOI,
+  image: dem_AOI,
   region: AOI_geometry,
   scale: 50,
   minBucketWidth: 50
@@ -70,7 +77,7 @@ var reducers_all = ee.Reducer.mean()
   .combine(ee.Reducer.min(), null, true)
   .combine(ee.Reducer.max(), null, true);
 
-var AOI_stats = srtm_AOI.reduceRegions({
+var AOI_stats = dem_AOI.reduceRegions({
   collection: AOI,
   reducer: reducers_all,
   scale: 30
@@ -85,7 +92,7 @@ print("AOI Stats (mean, min, max):", AOI_stats_clean);
 // ======================================================
 var percentiles = ee.Reducer.percentile([50, 95]);
 
-var AOI_percentiles = srtm_AOI.reduceRegions({
+var AOI_percentiles = dem_AOI.reduceRegions({
   collection: AOI,
   reducer: percentiles,
   scale: 30
@@ -103,11 +110,11 @@ print("AOI Percentiles (p50, p95):", AOI_percentiles_clean);
 
 // Export AOI elevation raster
 Export.image.toDrive({
-  image: srtm_AOI,
+  image: dem_AOI,
   description: output_prefix + '_AOI',
   fileNamePrefix: output_prefix + '_AOI',
   region: AOI_geometry,
-  scale: 30,                  // NASADEM native resolution
+  scale: 30,                  // NASADEM/SRTM native resolution
   maxPixels: 1e13,
   fileFormat: 'GeoTIFF',
   crs: 'EPSG:4326', 
@@ -116,7 +123,7 @@ Export.image.toDrive({
 
 // Export country elevation raster
 Export.image.toDrive({
-  image: srtm_country,
+  image: dem_country,
   description: output_prefix + '_' + country_name,
   fileNamePrefix: output_prefix + '_' + country_name,
   region: country,
